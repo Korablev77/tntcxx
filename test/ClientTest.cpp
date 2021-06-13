@@ -62,28 +62,48 @@ printResponse(Connection<BUFFER, NetProvider> &conn, Response<BUFFER> &response,
 			  " code=" << err.errcode << std::endl;
 		return;
 	}
-	assert(response.body.data != std::nullopt);
-	Data<BUFFER>& data = *response.body.data;
-	if (data.tuples.empty()) {
-		std::cout << "Empty result" << std::endl;
-		return;
+	if (response.body.sql_info  != std::nullopt) {
+		std::cout << "Row count = " << response.body.sql_info->row_count << std::endl;
 	}
-	std::vector<UserTuple> tuples;
-	switch (format) {
-		case TUPLES:
-			tuples = decodeUserTuple(conn.getInBuf(), data);
-			break;
-		case MULTI_RETURN:
-			tuples = decodeMultiReturn(conn.getInBuf(), data);
-			break;
-		case SELECT_RETURN:
-			tuples = decodeSelectReturn(conn.getInBuf(), data);
-			break;
-		default:
-			assert(0);
+	if (response.body.metadata != std::nullopt) {
+		std::vector<ColumnMap>& maps = response.body.metadata->column_maps;
+		std::cout << "Metadata:\n";
+		for (auto& map : maps) {
+			std::cout << "Field name: " << map.field_name << std::endl;
+			std::cout << "Field name len: " << map.field_name_len << std::endl;
+			std::cout << "Field type: " << map.field_type << std::endl;
+			std::cout << "Field type len: " << map.field_type_len << std::endl;
+			std::cout << "Collation: " << map.collation << std::endl;
+			std::cout << "Collation len: " << map.collation_len << std::endl;
+			std::cout << "Is nullable: " << map.is_nullable << std::endl;
+			std::cout << "Is autoincrement: " << map.is_autoincrement << std::endl;
+			std::cout << "Span: " << map.span << std::endl;
+			std::cout << "Span len: " << map.span_len << std::endl;
+		}
 	}
-	for (auto const& t : tuples) {
-		std::cout << t << std::endl;
+	if (response.body.data != std::nullopt) {
+		Data<BUFFER>& data = *response.body.data;
+		if (data.tuples.empty()) {
+			std::cout << "Empty result" << std::endl;
+			return;
+		}
+		std::vector<UserTuple> tuples;
+		switch (format) {
+			case TUPLES:
+				tuples = decodeUserTuple(conn.getInBuf(), data);
+				break;
+			case MULTI_RETURN:
+				tuples = decodeMultiReturn(conn.getInBuf(), data);
+				break;
+			case SELECT_RETURN:
+				tuples = decodeSelectReturn(conn.getInBuf(), data);
+				break;
+			default:
+				assert(0);
+		}
+		for (auto const& t : tuples) {
+			std::cout << t << std::endl;
+		}
 	}
 }
 
@@ -557,6 +577,126 @@ single_conn_call(Connector<BUFFER, NetProvider> &client)
 	client.close(conn);
 }
 
+
+/** Single connection, separate executes */
+template <class BUFFER, class NetProvider = Net_t>
+void
+single_conn_execute(Connector<BUFFER, NetProvider> &client)
+{
+	TEST_INIT(0);
+	Connection<Buf_t, NetProvider> conn(client);
+	int rc = client.connect(conn, localhost, port);
+	fail_unless(rc == 0);
+
+	TEST_CASE("CREATE TABLE");
+	rid_t create_table = conn.execute("CREATE TABLE IF NOT EXISTS testing_sql "
+									  "(column1 UNSIGNED PRIMARY KEY, "
+									  "column2 VARCHAR(50));", std::make_tuple());
+	
+	client.wait(conn, create_table, WAIT_TIMEOUT);
+	fail_unless(conn.futureIsReady(create_table));
+	std::optional<Response<Buf_t>> response = conn.getResponse(create_table);
+	fail_unless(response != std::nullopt);
+	fail_unless(response->body.sql_info != std::nullopt);
+
+	TEST_CASE("Simple INSERT");
+	rid_t insert = conn.execute("INSERT INTO testing_sql VALUES (20, 'first');", std::make_tuple());
+	client.wait(conn, insert, WAIT_TIMEOUT);
+	fail_unless(conn.futureIsReady(insert));
+	response = conn.getResponse(insert);
+	fail_unless(response != std::nullopt);
+	
+	if (response->body.error_stack != std::nullopt) {
+		std::cout << response->body.error_stack->error.msg << std::endl;
+	}
+	
+	fail_unless(response->body.sql_info != std::nullopt);
+	fail_unless(response->body.sql_info->row_count == 1);
+
+	TEST_CASE("INSERT with binding arguments");
+	std::tuple args = std::make_tuple(response->body.sql_info->row_count, "Timur", 2, "Nikita", 3, "Anastas");
+	rid_t insert_args = conn.execute("INSERT INTO testing_sql VALUES (?, ?), (?, ?), (?, ?);", args);
+	client.wait(conn, insert_args, WAIT_TIMEOUT);
+	fail_unless(conn.futureIsReady(insert_args));
+	response = conn.getResponse(insert_args);
+	fail_unless(response != std::nullopt);
+	fail_unless(response->body.sql_info != std::nullopt);
+	fail_unless(response->body.sql_info->row_count == 3);
+
+
+	TEST_CASE("SELECT");
+	rid_t select = conn.execute("SELECT * FROM testing_sql;", std::make_tuple());
+	client.wait(conn, select, WAIT_TIMEOUT);
+	fail_unless(conn.futureIsReady(select));
+	response = conn.getResponse(select);
+	fail_unless(response != std::nullopt);
+	fail_unless(response->body.metadata != std::nullopt);
+	
+	printResponse<BUFFER, NetProvider>(conn, *response);
+
+
+	TEST_CASE("prepare");
+	rid_t pr_select = conn.prepare("SELECT * FROM testing_sql;");
+	client.wait(conn, pr_select, WAIT_TIMEOUT);
+	fail_unless(conn.futureIsReady(pr_select));
+	response = conn.getResponse(pr_select);
+	fail_unless(response != std::nullopt);
+	fail_unless(response->body.stmt_id != std::nullopt);
+	fail_unless(response->body.bind_count != std::nullopt);
+	
+	if (response->body.error_stack != std::nullopt) {
+		std::cout << response->body.error_stack->error.msg << std::endl;
+	}
+
+	printResponse<BUFFER, NetProvider>(conn, *response);
+
+	TEST_CASE("execute SELECT by stmt_id");
+	rid_t exec_by_id = conn.execute(*response->body.stmt_id, std::make_tuple());
+	client.wait(conn, exec_by_id, WAIT_TIMEOUT);
+	fail_unless(conn.futureIsReady(exec_by_id));
+	response = conn.getResponse(exec_by_id);
+	fail_unless(response != std::nullopt);
+	fail_unless(response->body.data != std::nullopt);
+	fail_unless(response->body.metadata != std::nullopt);
+	
+	printResponse<BUFFER, NetProvider>(conn, *response);
+
+	TEST_CASE("prepare with binding");
+	rid_t pr_insert = conn.prepare("INSERT INTO testing_sql VALUES (?, ?, ?);");
+	client.wait(conn, pr_insert, WAIT_TIMEOUT);
+	fail_unless(conn.futureIsReady(pr_insert));
+	response = conn.getResponse(pr_insert);
+	fail_unless(response != std::nullopt);
+	fail_unless(response->body.stmt_id != std::nullopt);
+	fail_unless(response->body.bind_count != std::nullopt);
+
+
+	TEST_CASE("execute INSERT by stmt_id with binding");
+	rid_t exec_by_id_ins = conn.execute(*response->body.stmt_id, std::make_tuple(5, "Stranger", 7.9));
+	client.wait(conn, exec_by_id_ins, WAIT_TIMEOUT);
+	fail_unless(conn.futureIsReady(exec_by_id_ins));
+	response = conn.getResponse(exec_by_id_ins);
+	fail_unless(response != std::nullopt);
+	fail_unless(response->body.sql_info != std::nullopt);
+	fail_unless(response->body.sql_info->row_count == 1);
+
+
+	TEST_CASE("DROP TABLE");
+	rid_t drop_table = conn.execute("DROP TABLE IF EXISTS testing_sql;", std::make_tuple());
+	client.wait(conn, drop_table, WAIT_TIMEOUT);
+	fail_unless(conn.futureIsReady(drop_table));
+	response = conn.getResponse(drop_table);
+	fail_unless(response != std::nullopt);
+	fail_unless(response->body.sql_info != std::nullopt);
+
+	client.close(conn);
+}
+
+
+
+
+
+
 int main()
 {
 	if (cleanDir() != 0)
@@ -576,6 +716,7 @@ int main()
 	single_conn_upsert<Buf_t>(client);
 	single_conn_select<Buf_t>(client);
 	single_conn_call<Buf_t>(client);
+	single_conn_execute<Buf_t>(client);
 
 	/* LibEv network provide */
 	using NetLibEv_t = LibevNetProvider<Buf_t, NetworkEngine>;

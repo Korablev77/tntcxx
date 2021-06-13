@@ -174,6 +174,13 @@ public:
 	template <class T>
 	rid_t call(const std::string &func, const T &args);
 	rid_t ping();
+	template <class T>
+	rid_t execute(const std::string& statement, const T& parameters);
+
+	template <class T>
+	rid_t execute(unsigned int stmt_id, const T& parameters);
+
+	rid_t prepare(const std::string& statement);
 
 	void setError(const std::string &msg);
 	std::string& getError();
@@ -405,6 +412,37 @@ Connection<BUFFER, NetProvider>::select(const T &key, uint32_t space_id,
 	m_Connector.readyToSend(*this);
 	return RequestEncoder<BUFFER>::getSync();
 }
+
+template<class BUFFER, class NetProvider>
+template <class T>
+rid_t
+Connection<BUFFER, NetProvider>::execute(const std::string& statement, const T& parameters)
+{
+	m_EndEncoded += m_Encoder.encodeExecute(statement, parameters);
+	m_Connector.readyToSend(*this);
+	return RequestEncoder<BUFFER>::getSync();
+}
+
+template<class BUFFER, class NetProvider>
+template <class T>
+rid_t
+Connection<BUFFER, NetProvider>::execute(unsigned int stmt_id, const T& parameters)
+{
+	m_EndEncoded += m_Encoder.encodeExecute(stmt_id, parameters);
+	m_Connector.readyToSend(*this);
+	return RequestEncoder<BUFFER>::getSync();
+}
+
+template<class BUFFER, class NetProvider>
+rid_t
+Connection<BUFFER, NetProvider>::prepare(const std::string& statement)
+{
+	m_EndEncoded += m_Encoder.encodePrepare(statement);
+	m_Connector.readyToSend(*this);
+	return RequestEncoder<BUFFER>::getSync();
+}
+
+
 
 template<class BUFFER, class NetProvider>
 void
