@@ -69,16 +69,16 @@ printResponse(Connection<BUFFER, NetProvider> &conn, Response<BUFFER> &response,
 		std::vector<ColumnMap>& maps = response.body.metadata->column_maps;
 		std::cout << "Metadata:\n";
 		for (auto& map : maps) {
-			std::cout << "Field name: " << map.field_name << std::endl;
-			std::cout << "Field name len: " << map.field_name_len << std::endl;
-			std::cout << "Field type: " << map.field_type << std::endl;
-			std::cout << "Field type len: " << map.field_type_len << std::endl;
-			std::cout << "Collation: " << map.collation << std::endl;
-			std::cout << "Collation len: " << map.collation_len << std::endl;
-			std::cout << "Is nullable: " << map.is_nullable << std::endl;
+			std::cout << "Field name: "       << map.field_name       << std::endl;
+			std::cout << "Field name len: "   << map.field_name_len   << std::endl;
+			std::cout << "Field type: "       << map.field_type       << std::endl;
+			std::cout << "Field type len: "   << map.field_type_len   << std::endl;
+			std::cout << "Collation: "        << map.collation        << std::endl;
+			std::cout << "Collation len: "    << map.collation_len    << std::endl;
+			std::cout << "Is nullable: "      << map.is_nullable      << std::endl;
 			std::cout << "Is autoincrement: " << map.is_autoincrement << std::endl;
-			std::cout << "Span: " << map.span << std::endl;
-			std::cout << "Span len: " << map.span_len << std::endl;
+			std::cout << "Span: "             << map.span             << std::endl;
+			std::cout << "Span len: "         << map.span_len         << std::endl;
 		}
 	}
 	if (response.body.data != std::nullopt) {
@@ -104,6 +104,12 @@ printResponse(Connection<BUFFER, NetProvider> &conn, Response<BUFFER> &response,
 		for (auto const& t : tuples) {
 			std::cout << t << std::endl;
 		}
+	}
+	if (response.body.stmt_id    != std::nullopt) {
+		std::cout << "statement id = " << *response.body.stmt_id    << std::endl;
+	}
+	if (response.body.bind_count != std::nullopt) {
+		std::cout << "bind count = "   << *response.body.bind_count << std::endl;
 	}
 }
 
@@ -581,7 +587,7 @@ single_conn_call(Connector<BUFFER, NetProvider> &client)
 /** Single connection, separate executes */
 template <class BUFFER, class NetProvider = Net_t>
 void
-single_conn_execute(Connector<BUFFER, NetProvider> &client)
+single_conn_sql_statements(Connector<BUFFER, NetProvider> &client)
 {
 	TEST_INIT(0);
 	Connection<Buf_t, NetProvider> conn(client);
@@ -591,7 +597,8 @@ single_conn_execute(Connector<BUFFER, NetProvider> &client)
 	TEST_CASE("CREATE TABLE");
 	rid_t create_table = conn.execute("CREATE TABLE IF NOT EXISTS testing_sql "
 									  "(column1 UNSIGNED PRIMARY KEY, "
-									  "column2 VARCHAR(50));", std::make_tuple());
+									  "column2 VARCHAR(50), "
+									  "column3 DOUBLE);", std::make_tuple());
 	
 	client.wait(conn, create_table, WAIT_TIMEOUT);
 	fail_unless(conn.futureIsReady(create_table));
@@ -600,7 +607,7 @@ single_conn_execute(Connector<BUFFER, NetProvider> &client)
 	fail_unless(response->body.sql_info != std::nullopt);
 
 	TEST_CASE("Simple INSERT");
-	rid_t insert = conn.execute("INSERT INTO testing_sql VALUES (20, 'first');", std::make_tuple());
+	rid_t insert = conn.execute("INSERT INTO testing_sql VALUES (20, 'first', 3.2);", std::make_tuple());
 	client.wait(conn, insert, WAIT_TIMEOUT);
 	fail_unless(conn.futureIsReady(insert));
 	response = conn.getResponse(insert);
@@ -614,8 +621,10 @@ single_conn_execute(Connector<BUFFER, NetProvider> &client)
 	fail_unless(response->body.sql_info->row_count == 1);
 
 	TEST_CASE("INSERT with binding arguments");
-	std::tuple args = std::make_tuple(response->body.sql_info->row_count, "Timur", 2, "Nikita", 3, "Anastas");
-	rid_t insert_args = conn.execute("INSERT INTO testing_sql VALUES (?, ?), (?, ?), (?, ?);", args);
+	std::tuple args = std::make_tuple(response->body.sql_info->row_count, "Timur",   12.8,
+	                                                                   2, "Nikita",  -8.0,
+																	   3, "Anastas", 345.298);
+	rid_t insert_args = conn.execute("INSERT INTO testing_sql VALUES (?, ?, ?), (?, ?, ?), (?, ?, ?);", args);
 	client.wait(conn, insert_args, WAIT_TIMEOUT);
 	fail_unless(conn.futureIsReady(insert_args));
 	response = conn.getResponse(insert_args);
@@ -716,7 +725,7 @@ int main()
 	single_conn_upsert<Buf_t>(client);
 	single_conn_select<Buf_t>(client);
 	single_conn_call<Buf_t>(client);
-	single_conn_execute<Buf_t>(client);
+	single_conn_sql_statements<Buf_t>(client);
 
 	/* LibEv network provide */
 	using NetLibEv_t = LibevNetProvider<Buf_t, NetworkEngine>;

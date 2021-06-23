@@ -424,6 +424,7 @@ Connection<BUFFER, NetProvider>::execute(const std::string& statement, const T& 
 }
 
 template<class BUFFER, class NetProvider>
+<<<<<<< HEAD
 template <class T>
 rid_t
 Connection<BUFFER, NetProvider>::execute(unsigned int stmt_id, const T& parameters)
@@ -434,6 +435,8 @@ Connection<BUFFER, NetProvider>::execute(unsigned int stmt_id, const T& paramete
 }
 
 template<class BUFFER, class NetProvider>
+=======
+>>>>>>> fc37e11... Client: prepare()
 rid_t
 Connection<BUFFER, NetProvider>::prepare(const std::string& statement)
 {

@@ -117,6 +117,8 @@ struct Body {
 	std::optional<Data<BUFFER>> data;
 	std::optional<SqlInfo> sql_info;
 	std::optional<Metadata> metadata;
+	std::optional<uint32_t> stmt_id;
+	std::optional<int> bind_count;
 };
 
 template<class BUFFER>
@@ -514,7 +516,9 @@ struct BodyKeyReader : mpp::SimpleReaderBase<BUFFER, mpp::MP_UINT> {
 		using Str_t = mpp::SimpleStrReader<BUFFER, sizeof(Error{}.msg)>;
 		using Err_t = ErrorReader<BUFFER>;
 		using Data_t = DataReader<BUFFER>;
-	
+		using Unsigned_t = mpp::SimpleReader<BUFFER, mpp::MP_UINT, uint32_t>;
+		using Int_t = mpp::SimpleReader<BUFFER, mpp::MP_UINT, int>;
+		
 		switch (key) {
 			case Iproto::DATA: {
 				body.data = Data<BUFFER>(itr);
