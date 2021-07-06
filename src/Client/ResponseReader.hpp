@@ -426,7 +426,7 @@ struct ColumnMapKeyReader : mpp::SimpleReaderBase<BUFFER, mpp::MP_UINT> {
 				break;
 			}
 			default:
-				LOG_ERROR("Invalid error key: ", key);
+				LOG_ERROR("Invalid column map key: ", key);
 				dec.AbortAndSkipRead();
 		}
 	}

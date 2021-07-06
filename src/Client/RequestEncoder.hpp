@@ -84,7 +84,6 @@ public:
 			    IteratorType iterator = EQ);
 	template <class T>
 	size_t encodeExecute(const std::string& statement, const T& parameters);
-	size_t encodePrepare(const std::string& statement);
 	template <class T>
 	size_t encodeExecute(unsigned int stmt_id, const T& parameters);
 	size_t encodePrepare(const std::string& statement);
