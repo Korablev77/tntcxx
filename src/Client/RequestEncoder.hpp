@@ -83,6 +83,11 @@ public:
 			    uint32_t limit = UINT32_MAX, uint32_t offset = 0,
 			    IteratorType iterator = EQ);
 	template <class T>
+	size_t encodeExecute(const std::string& statement, const T& parameters);
+	template <class T>
+	size_t encodeExecute(unsigned int stmt_id, const T& parameters);
+	size_t encodePrepare(const std::string& statement);
+	template <class T>
 	size_t encodeCall(const std::string &func, const T &args);
 
 	/** Sync value is used as request id. */
@@ -235,6 +240,58 @@ RequestEncoder<BUFFER>::encodeSelect(const T &key,
 	m_Buf.set(request_start + 1, __builtin_bswap32(request_size));
 	return request_size + PREHEADER_SIZE;
 }
+
+template<class BUFFER>
+template <class T>
+size_t
+RequestEncoder<BUFFER>::encodeExecute(const std::string& statement, const T& parameters)
+{
+	iterator_t<BUFFER> request_start = m_Buf.end();
+	m_Buf.addBack('\xce');
+	m_Buf.addBack(uint32_t{0});
+	encodeHeader(Iproto::EXECUTE);
+	m_Enc.add(mpp::as_map(std::forward_as_tuple(
+		MPP_AS_CONST(Iproto::SQL_TEXT), statement,
+		MPP_AS_CONST(Iproto::SQL_BIND), parameters,
+		MPP_AS_CONST(Iproto::OPTIONS), std::make_tuple())));
+	uint32_t request_size = (m_Buf.end() - request_start) - PREHEADER_SIZE;
+	m_Buf.set(request_start + 1, __builtin_bswap32(request_size));
+	return request_size + PREHEADER_SIZE;
+}
+
+template<class BUFFER>
+template <class T>
+size_t
+RequestEncoder<BUFFER>::encodeExecute(unsigned int stmt_id, const T& parameters)
+{
+	iterator_t<BUFFER> request_start = m_Buf.end();
+	m_Buf.addBack('\xce');
+	m_Buf.addBack(uint32_t{0});
+	encodeHeader(Iproto::EXECUTE);
+	m_Enc.add(mpp::as_map(std::forward_as_tuple(
+		MPP_AS_CONST(Iproto::STMT_ID), stmt_id,
+		MPP_AS_CONST(Iproto::SQL_BIND), parameters,
+		MPP_AS_CONST(Iproto::OPTIONS), std::make_tuple())));
+	uint32_t request_size = (m_Buf.end() - request_start) - PREHEADER_SIZE;
+	m_Buf.set(request_start + 1, __builtin_bswap32(request_size));
+	return request_size + PREHEADER_SIZE;
+}
+
+template<class BUFFER>
+size_t
+RequestEncoder<BUFFER>::encodePrepare(const std::string& statement)
+{
+	iterator_t<BUFFER> request_start = m_Buf.end();
+	m_Buf.addBack('\xce');
+	m_Buf.addBack(uint32_t{0});
+	encodeHeader(Iproto::PREPARE);
+	m_Enc.add(mpp::as_map(std::forward_as_tuple(
+		MPP_AS_CONST(Iproto::SQL_TEXT), statement)));
+	uint32_t request_size = (m_Buf.end() - request_start) - PREHEADER_SIZE;
+	m_Buf.set(request_start + 1, __builtin_bswap32(request_size));
+	return request_size + PREHEADER_SIZE;
+}
+
 
 template<class BUFFER>
 template <class T>

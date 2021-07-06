@@ -84,10 +84,41 @@ struct Data {
 	iterator_t<BUFFER> end;
 };
 
+struct SqlInfo
+{
+	int row_count;
+};
+
+struct ColumnMap
+{
+	char field_name[Iproto::FIELD_NAME_MAX];
+	size_t field_name_len;
+	char field_type[Iproto::FIELD_TYPE_NAME_MAX];
+	size_t field_type_len;
+	char collation[Iproto::COLLATION_MAX];
+	size_t collation_len;
+	bool is_nullable;
+	bool is_autoincrement;
+	char span[Iproto::SPAN_MAX];
+	size_t span_len;
+};
+
+
+struct Metadata
+{
+	size_t dimension = 0;
+	std::vector<ColumnMap> column_maps;
+};
+
+
 template<class BUFFER>
 struct Body {
 	std::optional<ErrorStack> error_stack;
 	std::optional<Data<BUFFER>> data;
+	std::optional<SqlInfo> sql_info;
+	std::optional<Metadata> metadata;
+	std::optional<uint32_t> stmt_id;
+	std::optional<int> bind_count;
 };
 
 template<class BUFFER>
@@ -355,6 +386,126 @@ struct ErrorReader : mpp::SimpleReaderBase<BUFFER, mpp::MP_MAP> {
 };
 
 
+
+template <class BUFFER>
+struct ColumnMapKeyReader : mpp::SimpleReaderBase<BUFFER, mpp::MP_UINT> {
+
+	ColumnMapKeyReader(mpp::Dec<BUFFER>& d, ColumnMap& cm) : dec(d), column_map(cm) {}
+
+	void Value(const iterator_t<BUFFER>&, mpp::compact::Type, uint64_t key)
+	{
+		using FieldNameReader_t = mpp::SimpleStrReader<BUFFER, sizeof(ColumnMap{}.field_name)>;
+		using FieldTypeReader_t = mpp::SimpleStrReader<BUFFER, sizeof(ColumnMap{}.field_type)>;
+		using CollationReader_t = mpp::SimpleStrReader<BUFFER, sizeof(ColumnMap{}.collation)>;
+		using SpanReader_t = mpp::SimpleStrReader<BUFFER, sizeof(ColumnMap{}.span)>;
+		using Bool_t = mpp::SimpleReader<BUFFER, mpp::MP_BOOL, bool>;
+		//TODO: handle "access denied" and custom errors
+		switch (key) {
+			case Iproto::FIELD_NAME: {
+				dec.SetReader(true, FieldNameReader_t{column_map.field_name, column_map.field_name_len});
+				break;
+			}
+			case Iproto::FIELD_TYPE: {
+				dec.SetReader(true, FieldTypeReader_t{column_map.field_type, column_map.field_type_len});
+				break;
+			}
+			case Iproto::FIELD_COLL: {
+				dec.SetReader(true, CollationReader_t{column_map.collation, column_map.collation_len});
+				break;
+			}
+			case Iproto::FIELD_IS_NULLABLE: {
+				dec.SetReader(true, Bool_t{column_map.is_nullable});
+				break;
+			}
+			case Iproto::FIELD_IS_AUTOINCREMENT: {
+				dec.SetReader(true, Bool_t{column_map.is_autoincrement});
+				break;
+			}
+			case Iproto::FIELD_SPAN: {
+				dec.SetReader(true, SpanReader_t{column_map.span, column_map.span_len});
+				break;
+			}
+			default:
+				LOG_ERROR("Invalid column map key: ", key);
+				dec.AbortAndSkipRead();
+		}
+	}
+	mpp::Dec<BUFFER>& dec;
+	ColumnMap& column_map;
+};
+
+template <class BUFFER>
+struct MetadataArrayValueReader : mpp::SimpleReaderBase<BUFFER, mpp::MP_MAP> {
+
+	MetadataArrayValueReader(mpp::Dec<BUFFER>& d, Metadata& md) : dec(d), metadata(md) {}
+
+	void Value(const iterator_t<BUFFER>&, mpp::compact::Type, mpp::MapValue)
+	{
+		metadata.column_maps.push_back(ColumnMap());
+		dec.SetReader(false, ColumnMapKeyReader<BUFFER>{dec, metadata.column_maps.back()});
+
+	}
+	mpp::Dec<BUFFER>& dec;
+	Metadata& metadata;
+};
+
+
+template <class BUFFER>
+struct MetadataArrayReader : mpp::SimpleReaderBase<BUFFER, mpp::MP_ARR> {
+
+	MetadataArrayReader(mpp::Dec<BUFFER>& d, Metadata& md) : dec(d), metadata(md) {}
+
+	void Value(const iterator_t<BUFFER>&, mpp::compact::Type, mpp::ArrValue)
+	{
+		dec.SetReader(false, MetadataArrayValueReader<BUFFER>{dec, metadata});
+	}
+	mpp::Dec<BUFFER>& dec;
+	Metadata& metadata;
+};
+
+
+
+
+template <class BUFFER>
+struct SqlInfoKeyReader : mpp::SimpleReaderBase<BUFFER, mpp::MP_UINT> {
+
+	SqlInfoKeyReader(mpp::Dec<BUFFER>& d, SqlInfo& sql_i) : dec(d), sql_info(sql_i) {}
+
+	void Value(const iterator_t<BUFFER>&, mpp::compact::Type, uint64_t key)
+	{
+		using Int_t = mpp::SimpleReader<BUFFER, mpp::MP_UINT, int>;
+		//TODO: handle "access denied" and custom errors
+		switch (key) {
+			case Iproto::SQL_INFO_ROW_COUNT: {
+				dec.SetReader(true, Int_t{sql_info.row_count});
+				break;
+			}
+			default:
+				LOG_ERROR("Invalid sql info key: ", key);
+				dec.AbortAndSkipRead();
+		}
+	}
+	mpp::Dec<BUFFER>& dec;
+	SqlInfo& sql_info;
+};
+
+
+
+template <class BUFFER>
+struct SqlInfoReader : mpp::SimpleReaderBase<BUFFER, mpp::MP_MAP> {
+
+	SqlInfoReader(mpp::Dec<BUFFER>& d, SqlInfo& sql_i) : dec(d), sql_info(sql_i) {}
+
+	void Value(const iterator_t<BUFFER>&, mpp::compact::Type, mpp::MapValue)
+	{
+		dec.SetReader(false, SqlInfoKeyReader{dec, sql_info});
+	}
+
+	mpp::Dec<BUFFER>& dec;
+	SqlInfo& sql_info;
+};
+
+
 template <class BUFFER>
 struct BodyKeyReader : mpp::SimpleReaderBase<BUFFER, mpp::MP_UINT> {
 
@@ -365,6 +516,9 @@ struct BodyKeyReader : mpp::SimpleReaderBase<BUFFER, mpp::MP_UINT> {
 		using Str_t = mpp::SimpleStrReader<BUFFER, sizeof(Error{}.msg)>;
 		using Err_t = ErrorReader<BUFFER>;
 		using Data_t = DataReader<BUFFER>;
+		using Unsigned_t = mpp::SimpleReader<BUFFER, mpp::MP_UINT, uint32_t>;
+		using Int_t = mpp::SimpleReader<BUFFER, mpp::MP_UINT, int>;
+		
 		switch (key) {
 			case Iproto::DATA: {
 				body.data = Data<BUFFER>(itr);
@@ -382,6 +536,30 @@ struct BodyKeyReader : mpp::SimpleReaderBase<BUFFER, mpp::MP_UINT> {
 				assert(body.error_stack != std::nullopt);
 				ErrorStack &error_stack = *body.error_stack;
 				dec.SetReader(true, Err_t{dec, error_stack});
+				break;
+			}
+			case Iproto::SQL_INFO: {
+				body.sql_info = SqlInfo();
+				dec.SetReader(true, SqlInfoReader{dec, *body.sql_info});
+				break;
+			}
+			case Iproto::METADATA: {
+				body.metadata = Metadata();
+				dec.SetReader(true, MetadataArrayReader{dec, *body.metadata});
+				break;
+			}
+			case Iproto::STMT_ID: {
+				body.stmt_id = 0;
+				dec.SetReader(true, Unsigned_t{*body.stmt_id});
+				break;
+			}
+			case Iproto::BIND_COUNT: {
+				body.bind_count = 0;
+				dec.SetReader(true, Int_t{*body.bind_count});
+				break;
+			}
+			case Iproto::BIND_METADATA: {
+				dec.Skip();
 				break;
 			}
 			default:
@@ -406,3 +584,4 @@ struct BodyReader : mpp::SimpleReaderBase<BUFFER, mpp::MP_MAP> {
 	mpp::Dec<BUFFER>& dec;
 	Body<BUFFER>& body;
 };
+

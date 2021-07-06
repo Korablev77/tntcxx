@@ -175,6 +175,33 @@ public:
 	rid_t call(const std::string &func, const T &args);
 	rid_t ping();
 
+
+	/**
+	 * Execute the SQL statement contained in the 'statement' parameter.
+	 * @param statement statement, which should conform to the rules for SQL grammar
+	 * @param parameters tuple for placeholders in the statement
+	 * @retval request id
+	 */
+	template <class T>
+	rid_t execute(const std::string& statement, const T& parameters);
+
+		/**
+	 * Execute the SQL statement contained in the 'statement' parameter.
+	 * @param stmt_id the statement id obtained with prepare()
+	 * @param parameters tuple for placeholders in the statement
+	 * @retval request id
+	 */
+	template <class T>
+	rid_t execute(unsigned int stmt_id, const T& parameters);
+
+	/**
+	 * Prepare the SQL statement contained in the 'statement' parameter. 
+	 * The syntax and requirements for Connection::prepare() are the same as for Connection::execute().
+	 * @param statement statement, which should conform to the rules for SQL grammar
+	 * @retval request id
+	 */
+	rid_t prepare(const std::string& statement);
+
 	void setError(const std::string &msg);
 	std::string& getError();
 	void reset();
@@ -405,6 +432,37 @@ Connection<BUFFER, NetProvider>::select(const T &key, uint32_t space_id,
 	m_Connector.readyToSend(*this);
 	return RequestEncoder<BUFFER>::getSync();
 }
+
+template<class BUFFER, class NetProvider>
+template <class T>
+rid_t
+Connection<BUFFER, NetProvider>::execute(const std::string& statement, const T& parameters)
+{
+	m_EndEncoded += m_Encoder.encodeExecute(statement, parameters);
+	m_Connector.readyToSend(*this);
+	return RequestEncoder<BUFFER>::getSync();
+}
+
+template<class BUFFER, class NetProvider>
+template <class T>
+rid_t
+Connection<BUFFER, NetProvider>::execute(unsigned int stmt_id, const T& parameters)
+{
+	m_EndEncoded += m_Encoder.encodeExecute(stmt_id, parameters);
+	m_Connector.readyToSend(*this);
+	return RequestEncoder<BUFFER>::getSync();
+}
+
+template<class BUFFER, class NetProvider>
+rid_t
+Connection<BUFFER, NetProvider>::prepare(const std::string& statement)
+{
+	m_EndEncoded += m_Encoder.encodePrepare(statement);
+	m_Connector.readyToSend(*this);
+	return RequestEncoder<BUFFER>::getSync();
+}
+
+
 
 template<class BUFFER, class NetProvider>
 void

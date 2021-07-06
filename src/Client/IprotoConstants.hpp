@@ -49,6 +49,7 @@ namespace Iproto {
 		FLAG_COMMIT = 0x01,
 	};
 
+
 	enum Key {
 		REQUEST_TYPE = 0x00,
 		SYNC = 0x01,
@@ -102,6 +103,13 @@ namespace Iproto {
 		FIELD_SPAN = 5,
 	};
 
+	enum ColumnMap {
+		FIELD_NAME_MAX = 256,
+		FIELD_TYPE_NAME_MAX = 32,
+		COLLATION_MAX = 32,
+		SPAN_MAX = 256
+	};
+
 	enum Type {
 		OK = 0,
 		SELECT = 1,
@@ -133,6 +141,12 @@ namespace Iproto {
 		VY_RUN_ROW_INDEX = 102,
 		CHUNK = 128,
 		TYPE_ERROR = 1 << 15
+	};
+
+	/** Keys of IPROTO_SQL_INFO map. */
+	enum SqlInfoKey {
+		SQL_INFO_ROW_COUNT = 0x00,
+		SQL_INFO_AUTOINCREMENT_IDS = 0x01
 	};
 
 	enum ErrorStack {
